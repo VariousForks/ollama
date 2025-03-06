@@ -523,7 +523,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			// for chunksums.
 			go fetchTargetRequest()
 
-			pw, err := c.PutChunks(l.Digest, l.Size)
+			chunker, err := c.PutChunks(l.Digest, l.Size)
 			if err != nil {
 				t.update(l, 0, err)
 				continue
@@ -560,13 +560,11 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 							}
 							defer res.Body.Close()
 
-							_, err = io.CopyN(pw, res.Body, chunk.Size())
+							err = chunker.Put(chunk.Digest, chunk.Size(), res.Body)
 							if err != nil {
-								return maybeUnexpectedEOF(err)
-							}
-							if err := pw.Flush(); err != nil {
 								return err
 							}
+
 							progress.Add(chunk.Size())
 							return nil
 						}()
