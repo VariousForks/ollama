@@ -35,7 +35,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ollama/ollama/server/internal/cache/blob"
-	"github.com/ollama/ollama/server/internal/chunks"
 	"github.com/ollama/ollama/server/internal/internal/backoff"
 	"github.com/ollama/ollama/server/internal/internal/names"
 
@@ -523,34 +522,33 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			go fetchTargetRequest()
 
 			var progress atomic.Int64
-			for chunk := range chunks.Of(l.Size, r.maxChunkSize()) {
-				if ctx.Err() != nil {
-					break
+			for chunk, err := range chunksums(ctx, l.Digest) {
+				// Get our request before we start any
+				// goroutines. This prevents us from having
+				// MANY goroutines start, only to fail because
+				// the request to get the target URL failed,
+				// which end up calling t.update with each of
+				// their encounters with the error.
+				reqTmpl, err := fetchTargetRequest()
+				if err != nil {
+					return err
 				}
+
 				g.Go(func() (err error) {
-					defer func() {
-						if err != nil {
-							q.CloseWithError(err)
-						}
-						t.update(l, progress.Load(), err)
-					}()
+					defer func() { t.update(l, progress.Load(), err) }()
 
 					for _, err := range backoff.Loop(ctx, 3*time.Second) {
 						if err != nil {
 							return err
 						}
 						err := func() error {
-							req := req.Clone(req.Context())
+							req := reqTmpl.Clone(reqTmpl.Context())
 							req.Header.Set("Range", fmt.Sprintf("bytes=%s", chunk))
 							res, err := sendRequest(r.client(), req)
 							if err != nil {
 								return err
 							}
 							defer res.Body.Close()
-
-							tw := wp.get()
-							tw.Reset(ticket)
-							defer wp.put(tw)
 
 							_, err = io.CopyN(tw, res.Body, chunk.Size())
 							if err != nil {
