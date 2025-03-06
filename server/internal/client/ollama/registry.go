@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"iter"
 	"log/slog"
 	"net/http"
 	"os"
@@ -523,12 +524,12 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			// for chunksums.
 			go fetchTargetRequest()
 
-			chunker, err := c.PutChunks(l.Digest, l.Size)
+			chunked, err := c.PutChunked(l.Digest, l.Size)
 			if err != nil {
 				t.update(l, 0, err)
 				continue
 			}
-			defer chunker.Close()
+			defer chunked.Close()
 
 			var progress atomic.Int64
 			for chunk, err := range chunksums(ctx, l.Digest) {
@@ -561,7 +562,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 							}
 							defer res.Body.Close()
 
-							err = chunker.Put(chunk, res.Body)
+							err = chunked.Put(chunk, res.Body)
 							if err != nil {
 								return err
 							}
@@ -735,6 +736,12 @@ func (r *Registry) Resolve(ctx context.Context, name string) (*Manifest, error) 
 		return nil, fmt.Errorf("%s: %w", name, errors.Join(ErrManifestInvalid, err))
 	}
 	return m, nil
+}
+
+func (r *Registry) chunksums(ctx context.Context, d blob.Digest) iter.Seq2[blob.Chunk, error] {
+	return func(yield func(blob.Chunk, error) bool) {
+
+	}
 }
 
 func (r *Registry) client() *http.Client {
