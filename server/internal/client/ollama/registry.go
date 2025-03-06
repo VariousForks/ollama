@@ -38,7 +38,6 @@ import (
 	"github.com/ollama/ollama/server/internal/chunks"
 	"github.com/ollama/ollama/server/internal/internal/backoff"
 	"github.com/ollama/ollama/server/internal/internal/names"
-	"github.com/ollama/ollama/server/internal/internal/syncs"
 
 	_ "embed"
 )
@@ -473,16 +472,16 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			continue
 		}
 
-		blobURL := fmt.Sprintf("%s://%s/v2/%s/%s/blobs/%s", scheme, n.Host(), n.Namespace(), n.Model(), l.Digest)
-		req, err := r.newRequest(ctx, "GET", blobURL, nil)
-		if err != nil {
-			t.update(l, 0, err)
-			continue
-		}
-
 		t.update(l, 0, nil)
 
+		blobURL := fmt.Sprintf("%s://%s/v2/%s/%s/blobs/%s", scheme, n.Host(), n.Namespace(), n.Model(), l.Digest)
+
 		if l.Size <= r.maxChunkingThreshold() {
+			req, err := r.newRequest(ctx, "GET", blobURL, nil)
+			if err != nil {
+				t.update(l, 0, err)
+				continue
+			}
 			g.Go(func() error {
 				// TODO(bmizerany): retry/backoff like below in
 				// the chunking case
@@ -498,29 +497,30 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 				return err
 			})
 		} else {
-			q := syncs.NewRelayReader()
-
-			g.Go(func() (err error) {
-				defer func() { q.CloseWithError(err) }()
-				return c.Put(l.Digest, q, l.Size)
+			fetchTargetRequest := sync.OnceValues(func() (*http.Request, error) {
+				// Send a tracer request to find the target
+				// download URL. This helps us avoid extra
+				// roundtrips to the registry that will all
+				// send us to the same place as the first
+				// request.
+				req, err := r.newRequest(ctx, "GET", blobURL, nil)
+				if err != nil {
+					return nil, err
+				}
+				req.Header.Set("Range", "bytes=0-0")
+				res, err := sendRequest(r.client(), req)
+				if err != nil {
+					return nil, err
+				}
+				res.Body.Close()
+				return res.Request.WithContext(req.Context()), nil
 			})
 
+			// Prefetch the target request while we start looking
+			// for chunksums.
+			go fetchTargetRequest()
+
 			var progress atomic.Int64
-
-			// We want to avoid extra round trips per chunk due to
-			// redirects from the registry to the blob store, so
-			// fire an initial request to get the final URL and
-			// then use that URL for the chunk requests.
-			req.Header.Set("Range", "bytes=0-0")
-			res, err := sendRequest(r.client(), req)
-			if err != nil {
-				return err
-			}
-			res.Body.Close()
-			req = res.Request.WithContext(req.Context())
-
-			wp := writerPool{size: r.maxChunkSize()}
-
 			for chunk := range chunks.Of(l.Size, r.maxChunkSize()) {
 				if ctx.Err() != nil {
 					break
