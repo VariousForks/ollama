@@ -504,6 +504,8 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 				// roundtrips because the registry will send us
 				// to the same place per chunk, so just take
 				// the first and use it for all chunks.
+				//
+				// TODO(bmizerany): retry with backoff
 				req, err := r.newRequest(ctx, "GET", blobURL, nil)
 				if err != nil {
 					return nil, err
@@ -523,12 +525,10 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 
 			var progress atomic.Int64
 			for chunk, err := range chunksums(ctx, l.Digest) {
-				// Get our request before we start any
-				// goroutines. This prevents us from having
-				// MANY goroutines start, only to fail because
-				// the request to get the target URL failed,
-				// which end up calling t.update with each of
-				// their encounters with the error.
+				// Prevent wasted efforts and duplicated calls
+				// to t.update, if the targetURL could not be
+				// obtained, by calling fetchTargetRequest
+				// before starting goroutines.
 				targetReq, err := fetchTargetRequest()
 				if err != nil {
 					// The tracer request failed, so we
@@ -573,7 +573,6 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			}
 		}
 	}
-
 	if err := g.Wait(); err != nil {
 		return err
 	}
