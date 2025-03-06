@@ -529,8 +529,12 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 				// the request to get the target URL failed,
 				// which end up calling t.update with each of
 				// their encounters with the error.
-				reqTmpl, err := fetchTargetRequest()
+				targetReq, err := fetchTargetRequest()
 				if err != nil {
+					// The tracer request failed, so we
+					// can't proceed. Update any tracers
+					// and return.
+					t.update(l, 0, err)
 					return err
 				}
 
@@ -542,7 +546,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 							return err
 						}
 						err := func() error {
-							req := reqTmpl.Clone(reqTmpl.Context())
+							req := targetReq.Clone(targetReq.Context())
 							req.Header.Set("Range", fmt.Sprintf("bytes=%s", chunk))
 							res, err := sendRequest(r.client(), req)
 							if err != nil {
@@ -550,18 +554,14 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 							}
 							defer res.Body.Close()
 
-							_, err = io.CopyN(tw, res.Body, chunk.Size())
+							_, err = io.CopyN(pw, res.Body, chunk.Size())
 							if err != nil {
 								return maybeUnexpectedEOF(err)
 							}
-							if err := tw.Flush(); err != nil {
+							if err := pw.Flush(); err != nil {
 								return err
 							}
-
-							total := progress.Add(chunk.Size())
-							if total >= l.Size {
-								q.Close()
-							}
+							progress.Add(chunk.Size())
 							return nil
 						}()
 						if !canRetry(err) {
