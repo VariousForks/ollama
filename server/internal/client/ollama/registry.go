@@ -523,6 +523,12 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			// for chunksums.
 			go fetchTargetRequest()
 
+			pw, err := c.PutChunks(l.Digest, l.Size)
+			if err != nil {
+				t.update(l, 0, err)
+				continue
+			}
+
 			var progress atomic.Int64
 			for chunk, err := range chunksums(ctx, l.Digest) {
 				// Prevent wasted efforts and duplicated calls
@@ -531,9 +537,9 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 				// before starting goroutines.
 				targetReq, err := fetchTargetRequest()
 				if err != nil {
-					// The tracer request failed, so we
-					// can't proceed. Update any tracers
-					// and return.
+					// The target request failed, so we
+					// can't proceed. Update any traces and
+					// return.
 					t.update(l, 0, err)
 					return err
 				}
