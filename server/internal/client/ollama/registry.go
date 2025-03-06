@@ -528,6 +528,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 				t.update(l, 0, err)
 				continue
 			}
+			defer chunker.Close()
 
 			var progress atomic.Int64
 			for chunk, err := range chunksums(ctx, l.Digest) {
@@ -560,7 +561,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 							}
 							defer res.Body.Close()
 
-							err = chunker.Put(chunk.Digest, chunk.Size(), res.Body)
+							err = chunker.Put(chunk, res.Body)
 							if err != nil {
 								return err
 							}
