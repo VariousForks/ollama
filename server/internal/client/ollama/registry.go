@@ -499,10 +499,12 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 		} else {
 			fetchTargetRequest := sync.OnceValues(func() (*http.Request, error) {
 				// Send a tracer request to find the target
-				// download URL. This helps us avoid extra
-				// roundtrips to the registry that will all
-				// send us to the same place as the first
-				// request.
+				// download URL.
+				//
+				// Without this, we'll end up with 2x the
+				// roundtrips because the registry will send us
+				// to the same place per chunk, so just take
+				// the first and use it for all chunks.
 				req, err := r.newRequest(ctx, "GET", blobURL, nil)
 				if err != nil {
 					return nil, err
@@ -525,14 +527,11 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 				if ctx.Err() != nil {
 					break
 				}
-
-				ticket := q.Take()
 				g.Go(func() (err error) {
 					defer func() {
 						if err != nil {
 							q.CloseWithError(err)
 						}
-						ticket.Close()
 						t.update(l, progress.Load(), err)
 					}()
 
