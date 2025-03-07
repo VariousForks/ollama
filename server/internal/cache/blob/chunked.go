@@ -1,27 +1,41 @@
 package blob
 
 import (
+	"crypto/sha256"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/ollama/ollama/server/internal/chunks"
 )
 
 type Chunker struct {
-	size int64
-	f    *os.File
+	cache *DiskCache
+	size  int64
+	f     *os.File // nil means pre-validated
 
+	mu        sync.Mutex
 	completed []chunks.Chunk
-}
-
-func (cw *Chunker) Put(d Digest, size int64, r io.Reader) (int, error) {
-	panic("TODO")
 }
 
 func (cw *Chunker) Complete() bool {
 	panic("TODO")
 }
 
+// Put puts a chunk of data into the chunked file. The chunk must not overlap
+// with any previously put chunks. The Digest is the digest of the data in the
+// chunk, not the whole file.
+func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) (int, error) {
+	w := &checkWriter{
+		d:    d,
+		size: c.Size(),
+		h:    sha256.New(),
+		// f:    f,
+	}
+	panic("TODO")
+}
+
+// Close closes the chunked file. It must be called after all calls to Put.
 func (cw *Chunker) Close() error {
 	return cw.f.Close()
 }
@@ -37,4 +51,11 @@ func (c *DiskCache) Chunked(d Digest, size int64) (*Chunker, error) {
 	if err == nil && info.Size() == size {
 		return &Chunker{completed: completed(size)}, nil
 	}
+
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0o666)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Chunker{size: size, f: f}, nil
 }
