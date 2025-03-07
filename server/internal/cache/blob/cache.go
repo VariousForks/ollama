@@ -423,6 +423,8 @@ type checkWriter struct {
 	n   int64
 	w   io.Writer // lazily set to f or an io.OffsetWriter if offset > 0
 	err error
+
+	testHookBeforeFinalWrite func(*os.File)
 }
 
 func (w *checkWriter) seterr(err error) error {
@@ -458,6 +460,9 @@ func (w *checkWriter) Write(p []byte) (int, error) {
 		sum := w.h.Sum(nil)
 		if !bytes.Equal(sum, w.d.sum[:]) {
 			return 0, w.seterr(fmt.Errorf("file content changed underfoot"))
+		}
+		if w.testHookBeforeFinalWrite != nil {
+			w.testHookBeforeFinalWrite(w.f)
 		}
 	}
 	if nextSize > w.size {
@@ -507,6 +512,8 @@ func (c *DiskCache) copyNamedFile(name string, file io.Reader, out Digest, size 
 		size: size,
 		h:    sha256.New(),
 		f:    f,
+
+		testHookBeforeFinalWrite: c.testHookBeforeFinalWrite,
 	}
 	n, err := io.Copy(cw, file)
 	if err != nil {

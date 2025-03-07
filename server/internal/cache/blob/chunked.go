@@ -5,18 +5,19 @@ import (
 	"errors"
 	"io"
 	"os"
-	"sync"
 
 	"github.com/ollama/ollama/server/internal/chunks"
+)
+
+// Errors
+var (
+	ErrFileComplete = errors.New("blob is complete")
 )
 
 type Chunker struct {
 	cache *DiskCache
 	size  int64
 	f     *os.File // nil means pre-validated
-
-	mu        sync.Mutex
-	completed []chunks.Chunk
 }
 
 func (cw *Chunker) Complete() bool {
@@ -27,10 +28,10 @@ func (cw *Chunker) Complete() bool {
 // with any previously put chunks. The Digest is the digest of the data in the
 // chunk, not the whole file.
 //
-// It returnes os.ErrInvalid if the Chunker is not open or has been completed.
+// If the chunked file is complete, Put will return ErrFileComplete.
 func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) error {
 	if cw.f == nil {
-		return os.ErrInvalid
+		return ErrFileComplete
 	}
 	w := &checkWriter{
 		d:      d,
@@ -40,18 +41,10 @@ func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) error {
 		f:      cw.f,
 	}
 	_, err := io.CopyN(w, r, c.Size())
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return io.ErrUnexpectedEOF
-		}
-		return err
+	if err != nil && errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
 	}
-
-	cw.mu.Lock()
-	cw.completed = append(cw.completed, c)
-	cw.mu.Unlock()
-
-	return nil
+	return err
 }
 
 // Close closes the chunked file. It must be called after all calls to Put.
@@ -68,7 +61,7 @@ func (c *DiskCache) Chunked(d Digest, size int64) (*Chunker, error) {
 	name := c.GetFile(d)
 	info, err := os.Stat(name)
 	if err == nil && info.Size() == size {
-		return &Chunker{completed: completed(size)}, nil
+		return &Chunker{}, nil
 	}
 
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0o666)
