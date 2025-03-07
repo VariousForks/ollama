@@ -74,7 +74,7 @@ func (c *Chunker) Close() error {
 // // NOTE: Do not use chunk.String() here, it is not stable, and will
 // // cause a cache miss if the implementation changes, causing all users
 // // to redownload all chunks unnecessarily.
-// actionData := fmt.Sprintf("v1 chunked put %s %d-%d: %s", d, chunk.Start, chunk.End, fname)
+// actionData := fmt.Sprintf("v1 put %s chunk %d-%d: %s", d, chunk.Start, chunk.End, fname)
 //
 // action := DigestFromBytes(actionData)
 // _, err := c.cache.Get(action)

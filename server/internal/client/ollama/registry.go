@@ -524,7 +524,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			// for chunksums.
 			go fetchTargetRequest()
 
-			chunked, err := c.PutChunked(l.Digest, l.Size)
+			chunked, err := c.Chunked(l.Digest, l.Size)
 			if err != nil {
 				t.update(l, 0, err)
 				continue
@@ -532,7 +532,7 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			defer chunked.Close()
 
 			var progress atomic.Int64
-			for chunk, err := range chunksums(ctx, l.Digest) {
+			for cs, err := range chunksums(ctx, l.Digest) {
 				// Prevent wasted efforts and duplicated calls
 				// to t.update, if the targetURL could not be
 				// obtained, by calling fetchTargetRequest
@@ -555,19 +555,19 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 						}
 						err := func() error {
 							req := targetReq.Clone(targetReq.Context())
-							req.Header.Set("Range", fmt.Sprintf("bytes=%s", chunk))
+							req.Header.Set("Range", fmt.Sprintf("bytes=%s", cs.Chunk))
 							res, err := sendRequest(r.client(), req)
 							if err != nil {
 								return err
 							}
 							defer res.Body.Close()
 
-							err = chunked.Put(chunk, res.Body)
+							err = chunked.Put(cs.Chunk, cs.Digest, res.Body)
 							if err != nil {
 								return err
 							}
 
-							progress.Add(chunk.Size())
+							progress.Add(cs.Chunk.Size())
 							return nil
 						}()
 						if !canRetry(err) {
