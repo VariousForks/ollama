@@ -2,6 +2,7 @@ package blob
 
 import (
 	"crypto/sha256"
+	"errors"
 	"io"
 	"os"
 	"sync"
@@ -25,9 +26,9 @@ func (cw *Chunker) Complete() bool {
 // Put puts a chunk of data into the chunked file. The chunk must not overlap
 // with any previously put chunks. The Digest is the digest of the data in the
 // chunk, not the whole file.
-func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) (int, error) {
+func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) error {
 	if cw.f == nil {
-		return 0, os.ErrInvalid
+		return os.ErrInvalid
 	}
 	w := &checkWriter{
 		d:      d,
@@ -36,8 +37,11 @@ func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) (int, error) {
 		h:      sha256.New(),
 		f:      cw.f,
 	}
-	_ = w
-	panic("TODO")
+	_, err := io.CopyN(w, r, c.Size())
+	if err != nil && errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 // Close closes the chunked file. It must be called after all calls to Put.
