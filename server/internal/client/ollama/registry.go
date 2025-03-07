@@ -36,6 +36,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ollama/ollama/server/internal/cache/blob"
+	"github.com/ollama/ollama/server/internal/chunks"
 	"github.com/ollama/ollama/server/internal/internal/backoff"
 	"github.com/ollama/ollama/server/internal/internal/names"
 
@@ -475,7 +476,6 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 		t.update(l, 0, nil)
 
 		blobURL := fmt.Sprintf("%s://%s/v2/%s/%s/blobs/%s", scheme, n.Host(), n.Namespace(), n.Model(), l.Digest)
-
 		if l.Size <= r.maxChunkingThreshold() {
 			req, err := r.newRequest(ctx, "GET", blobURL, nil)
 			if err != nil {
@@ -531,8 +531,22 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			}
 			defer chunked.Close()
 
+			chunksumsURL := fmt.Sprintf("%s://%s/v2/%s/%s/chunksums/%s", scheme, n.Host(), n.Namespace(), n.Model(), l.Digest)
+			req, err := r.newRequest(ctx, "GET", chunksumsURL, nil)
+			if err != nil {
+				t.update(l, 0, err)
+				continue
+			}
+
+			res, err := sendRequest(r.client(), req)
+			if err != nil {
+				t.update(l, 0, err)
+				continue
+			}
+			defer res.Body.Close()
+
 			var progress atomic.Int64
-			for cs, err := range r.chunksums(ctx, l.Digest) {
+			for cs, err := range chunksums(res.Body) {
 				if err != nil {
 					t.update(l, progress.Load(), err)
 					break
@@ -748,9 +762,35 @@ type chunksum struct {
 	Digest blob.Digest
 }
 
-func (r *Registry) chunksums(ctx context.Context, d blob.Digest) iter.Seq2[chunksum, error] {
+func chunksums(r io.Reader) iter.Seq2[chunksum, error] {
 	return func(yield func(chunksum, error) bool) {
-		panic("TODO")
+		s := bufio.NewScanner(r)
+		var lineno int
+		for s.Scan() {
+			lineno++
+			line := strings.TrimSpace(s.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.Fields(line)
+			if len(parts) != 2 {
+				yield(chunksum{}, fmt.Errorf("invalid chunksum line %d: %q", lineno, line))
+				return
+			}
+			d, err := blob.ParseDigest(parts[0])
+			if err != nil {
+				yield(chunksum{}, fmt.Errorf("invalid digest %d: %q", lineno, parts[0]))
+				return
+			}
+			chunk, err := chunks.Parse(parts[1])
+			if err != nil {
+				yield(chunksum{}, fmt.Errorf("invalid chunk range %d: %q", lineno, parts[1]))
+				return
+			}
+			if !yield(chunksum{Chunk: chunk, Digest: d}, nil) {
+				return
+			}
+		}
 	}
 }
 
