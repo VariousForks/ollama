@@ -16,6 +16,8 @@ var (
 	ErrFileComplete = errors.New("blob is complete")
 )
 
+// Chunker is a writer for writing a file in chunks to a DiskCache. Its zero
+// value is invalid. Use [DiskCache.Chunked] to create a new Chunker.
 type Chunker struct {
 	cache *DiskCache
 	size  int64
