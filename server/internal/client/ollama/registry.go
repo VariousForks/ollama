@@ -532,7 +532,12 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			defer chunked.Close()
 
 			var progress atomic.Int64
-			for cs, err := range chunksums(ctx, l.Digest) {
+			for cs, err := range r.chunksums(ctx, l.Digest) {
+				if err != nil {
+					t.update(l, progress.Load(), err)
+					break
+				}
+
 				// Prevent wasted efforts and duplicated calls
 				// to t.update, if the targetURL could not be
 				// obtained, by calling fetchTargetRequest
