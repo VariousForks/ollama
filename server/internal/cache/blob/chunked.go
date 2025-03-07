@@ -26,12 +26,17 @@ func (cw *Chunker) Complete() bool {
 // with any previously put chunks. The Digest is the digest of the data in the
 // chunk, not the whole file.
 func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) (int, error) {
-	w := &checkWriter{
-		d:    d,
-		size: c.Size(),
-		h:    sha256.New(),
-		// f:    f,
+	if cw.f == nil {
+		return 0, os.ErrInvalid
 	}
+	w := &checkWriter{
+		d:      d,
+		offset: c.Start,
+		size:   c.Size(),
+		h:      sha256.New(),
+		f:      cw.f,
+	}
+	_ = w
 	panic("TODO")
 }
 

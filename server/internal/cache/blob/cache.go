@@ -414,14 +414,15 @@ func (c *DiskCache) links() iter.Seq2[string, error] {
 }
 
 type checkWriter struct {
-	d    Digest
-	size int64
-	n    int64
-	h    hash.Hash
-	f    *os.File
-	err  error
+	offset int64
+	size   int64
+	d      Digest
+	f      *os.File
+	h      hash.Hash
 
-	testHookBeforeFinalWrite func(*os.File)
+	n   int64
+	w   io.Writer // lazily set to f or an io.OffsetWriter if offset > 0
+	err error
 }
 
 func (w *checkWriter) seterr(err error) error {
@@ -435,6 +436,18 @@ func (w *checkWriter) seterr(err error) error {
 // underlying writer is guaranteed to be the last byte of p as verified by the
 // hash.
 func (w *checkWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+
+	if w.w == nil {
+		if w.offset > 0 {
+			w.w = io.NewOffsetWriter(w.f, w.offset)
+		} else {
+			w.w = w.f
+		}
+	}
+
 	_, err := w.h.Write(p)
 	if err != nil {
 		return 0, w.seterr(err)
@@ -445,9 +458,6 @@ func (w *checkWriter) Write(p []byte) (int, error) {
 		sum := w.h.Sum(nil)
 		if !bytes.Equal(sum, w.d.sum[:]) {
 			return 0, w.seterr(fmt.Errorf("file content changed underfoot"))
-		}
-		if w.testHookBeforeFinalWrite != nil {
-			w.testHookBeforeFinalWrite(w.f)
 		}
 	}
 	if nextSize > w.size {
@@ -493,11 +503,10 @@ func (c *DiskCache) copyNamedFile(name string, file io.Reader, out Digest, size 
 
 	// Copy file to f, but also into h to double-check hash.
 	cw := &checkWriter{
-		d:                        out,
-		size:                     size,
-		h:                        sha256.New(),
-		f:                        f,
-		testHookBeforeFinalWrite: c.testHookBeforeFinalWrite,
+		d:    out,
+		size: size,
+		h:    sha256.New(),
+		f:    f,
 	}
 	n, err := io.Copy(cw, file)
 	if err != nil {
