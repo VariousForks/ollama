@@ -26,6 +26,8 @@ func (cw *Chunker) Complete() bool {
 // Put puts a chunk of data into the chunked file. The chunk must not overlap
 // with any previously put chunks. The Digest is the digest of the data in the
 // chunk, not the whole file.
+//
+// It returnes os.ErrInvalid if the Chunker is not open or has been completed.
 func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) error {
 	if cw.f == nil {
 		return os.ErrInvalid
@@ -38,10 +40,18 @@ func (cw *Chunker) Put(c chunks.Chunk, d Digest, r io.Reader) error {
 		f:      cw.f,
 	}
 	_, err := io.CopyN(w, r, c.Size())
-	if err != nil && errors.Is(err, io.EOF) {
-		return io.ErrUnexpectedEOF
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
+		}
+		return err
 	}
-	return err
+
+	cw.mu.Lock()
+	cw.completed = append(cw.completed, c)
+	cw.mu.Unlock()
+
+	return nil
 }
 
 // Close closes the chunked file. It must be called after all calls to Put.
