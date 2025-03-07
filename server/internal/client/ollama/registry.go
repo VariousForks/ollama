@@ -743,9 +743,14 @@ func (r *Registry) Resolve(ctx context.Context, name string) (*Manifest, error) 
 	return m, nil
 }
 
-func (r *Registry) chunksums(ctx context.Context, d blob.Digest) iter.Seq2[blob.Chunk, error] {
-	return func(yield func(blob.Chunk, error) bool) {
+type chunksum struct {
+	Chunk  blob.Chunk
+	Digest blob.Digest
+}
 
+func (r *Registry) chunksums(ctx context.Context, d blob.Digest) iter.Seq2[chunksum, error] {
+	return func(yield func(chunksum, error) bool) {
+		panic("TODO")
 	}
 }
 
