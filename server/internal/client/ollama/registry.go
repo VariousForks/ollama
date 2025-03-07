@@ -545,8 +545,15 @@ func (r *Registry) Pull(ctx context.Context, name string) error {
 			}
 			defer res.Body.Close()
 
+			if res.StatusCode != 200 {
+				t.update(l, 0, fmt.Errorf("unexpected status code %d", res.StatusCode))
+				continue
+			}
+
 			var progress atomic.Int64
 			for cs, err := range chunksums(res.Body) {
+				fmt.Println("chunksums", cs, err)
+
 				if err != nil {
 					t.update(l, progress.Load(), err)
 					break
